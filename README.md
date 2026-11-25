@@ -2,7 +2,7 @@
 
 A Python project for detecting faces in webcam feeds and photos and classifying whether they are wearing face masks.
 
-The current version draws a box around each detected face. Mask classification is planned for a later update.
+The app draws a box around each detected face and can optionally label it as wearing a mask or not wearing one.
 
 ## Run locally
 
@@ -24,3 +24,15 @@ python app.py --image "photo.jpg" --output "annotated.png"
 ```
 
 The app prints the number of detected faces and saves a new image with their bounding boxes. Choose a new output file in an existing folder.
+
+## Classify face masks
+
+Install the optional dependency and download [mask_detector.onnx](https://huggingface.co/Dao-Dung/face-mask-detector-onnx/blob/7f17625a18e809737e4ac44d39fc949994c4c1d1/mask_detector.onnx) to the project folder. The [MobileNetV2 model card](https://huggingface.co/Dao-Dung/face-mask-detector-onnx) credits the original Face-Mask-Detection project and includes its MIT license.
+
+```powershell
+python -m pip install -r requirements-mask.txt
+python app.py --mask-model "mask_detector.onnx"
+python app.py --image "photo.jpg" --output "classified.png" --mask-model "mask_detector.onnx"
+```
+
+The classifier runs locally and labels each detected face with a prediction and model score. Faces missed by the OpenCV detector cannot be classified.
