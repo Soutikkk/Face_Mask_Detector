@@ -5,6 +5,8 @@ import sys
 import cv2
 import numpy as np
 
+from mask_classifier import MaskClassifier
+
 
 WINDOW_TITLE = "Face Mask Detector"
 
@@ -17,15 +19,31 @@ def load_face_detector():
     return face_detector
 
 
-def mark_faces(frame, face_detector):
+def mark_faces(frame, face_detector, classifier=None):
     grayscale = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = face_detector.detectMultiScale(grayscale, minSize=(40, 40))
-    for x, y, width, height in faces:
-        cv2.rectangle(frame, (x, y), (x + width, y + height), (0, 200, 0), 2)
+    predictions = [None] * len(faces)
+    if classifier is not None:
+        predictions = [
+            classifier.predict(frame[y:y + height, x:x + width])
+            for x, y, width, height in faces
+        ]
+
+    for (x, y, width, height), prediction in zip(faces, predictions):
+        color = (0, 200, 0)
+        if prediction is not None:
+            label, confidence = prediction
+            if label == "No mask":
+                color = (0, 0, 255)
+            cv2.putText(
+                frame, f"{label} {confidence:.0%}", (x, max(18, y - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA,
+            )
+        cv2.rectangle(frame, (x, y), (x + width, y + height), color, 2)
     return len(faces)
 
 
-def run_image(image_path, output_path):
+def run_image(image_path, output_path, classifier=None):
     if not cv2.haveImageWriter(output_path.suffix):
         raise RuntimeError("Choose a supported output extension such as .png or .jpg.")
     image_data = np.frombuffer(image_path.read_bytes(), dtype=np.uint8)
@@ -33,7 +51,7 @@ def run_image(image_path, output_path):
     if frame is None:
         raise RuntimeError(f"Could not decode image: {image_path}")
 
-    face_count = mark_faces(frame, load_face_detector())
+    face_count = mark_faces(frame, load_face_detector(), classifier)
     success, encoded_image = cv2.imencode(output_path.suffix, frame)
     if not success:
         raise RuntimeError(f"Could not encode image: {output_path}")
@@ -42,7 +60,7 @@ def run_image(image_path, output_path):
     print(f"Faces detected: {face_count}. Saved image to {output_path}")
 
 
-def run_camera(camera_index):
+def run_camera(camera_index, classifier=None):
     face_detector = load_face_detector()
 
     camera = cv2.VideoCapture(camera_index)
@@ -56,7 +74,7 @@ def run_camera(camera_index):
             if not captured:
                 raise RuntimeError(f"Could not read a frame from camera {camera_index}.")
 
-            mark_faces(frame, face_detector)
+            mark_faces(frame, face_detector, classifier)
             cv2.imshow(WINDOW_TITLE, frame)
             preview_opened = True
             key = cv2.waitKey(1) & 0xFF
@@ -76,6 +94,7 @@ def main():
     source.add_argument("--camera", type=int, help="Webcam index (default: 0).")
     source.add_argument("--image", type=Path, help="Path to an input image.")
     parser.add_argument("--output", type=Path, help="Path for the annotated image.")
+    parser.add_argument("--mask-model", type=Path, help="Path to the ONNX mask classifier.")
     args = parser.parse_args()
     if args.camera is not None and args.camera < 0:
         parser.error("--camera must be zero or greater")
@@ -85,10 +104,11 @@ def main():
         parser.error("--output requires --image")
 
     try:
+        classifier = MaskClassifier(args.mask_model) if args.mask_model is not None else None
         if args.image is not None:
-            run_image(args.image, args.output)
+            run_image(args.image, args.output, classifier)
         else:
-            run_camera(args.camera or 0)
+            run_camera(args.camera or 0, classifier)
     except (OSError, RuntimeError, cv2.error) as error:
         print(error, file=sys.stderr)
         return 1
