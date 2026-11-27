@@ -36,3 +36,11 @@ python app.py --image "photo.jpg" --output "classified.png" --mask-model "mask_d
 ```
 
 The classifier runs locally and labels each detected face with a prediction and model score. Faces missed by the OpenCV detector cannot be classified.
+
+## Run the tests
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+The tests use the base dependencies and run without a camera or a model download.
