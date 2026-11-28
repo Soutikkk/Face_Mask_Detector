@@ -37,6 +37,8 @@ python app.py --image "photo.jpg" --output "classified.png" --mask-model "mask_d
 
 The classifier runs locally and labels each detected face with a prediction and model score. Faces missed by the OpenCV detector cannot be classified.
 
+Add `--min-mask-score 0.80` to either command to mark predictions below 80% as **Uncertain** in orange. The option accepts scores from `0.5` to `1`. By default the app displays the model's highest-scoring label for each detected face.
+
 ## Run the tests
 
 ```powershell

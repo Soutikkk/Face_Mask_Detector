@@ -19,7 +19,7 @@ def load_face_detector():
     return face_detector
 
 
-def mark_faces(frame, face_detector, classifier=None):
+def mark_faces(frame, face_detector, classifier=None, *, min_mask_score=None):
     grayscale = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = face_detector.detectMultiScale(grayscale, minSize=(40, 40))
     predictions = [None] * len(faces)
@@ -33,7 +33,10 @@ def mark_faces(frame, face_detector, classifier=None):
         color = (0, 200, 0)
         if prediction is not None:
             label, confidence = prediction
-            if label == "No mask":
+            if min_mask_score is not None and confidence < min_mask_score:
+                label = "Uncertain"
+                color = (0, 165, 255)
+            elif label == "No mask":
                 color = (0, 0, 255)
             cv2.putText(
                 frame, f"{label} {confidence:.0%}", (x, max(18, y - 6)),
@@ -43,7 +46,7 @@ def mark_faces(frame, face_detector, classifier=None):
     return len(faces)
 
 
-def run_image(image_path, output_path, classifier=None):
+def run_image(image_path, output_path, classifier=None, *, min_mask_score=None):
     if not cv2.haveImageWriter(output_path.suffix):
         raise RuntimeError("Choose a supported output extension such as .png or .jpg.")
     image_data = np.frombuffer(image_path.read_bytes(), dtype=np.uint8)
@@ -51,7 +54,7 @@ def run_image(image_path, output_path, classifier=None):
     if frame is None:
         raise RuntimeError(f"Could not decode image: {image_path}")
 
-    face_count = mark_faces(frame, load_face_detector(), classifier)
+    face_count = mark_faces(frame, load_face_detector(), classifier, min_mask_score=min_mask_score)
     success, encoded_image = cv2.imencode(output_path.suffix, frame)
     if not success:
         raise RuntimeError(f"Could not encode image: {output_path}")
@@ -60,7 +63,7 @@ def run_image(image_path, output_path, classifier=None):
     print(f"Faces detected: {face_count}. Saved image to {output_path}")
 
 
-def run_camera(camera_index, classifier=None):
+def run_camera(camera_index, classifier=None, *, min_mask_score=None):
     face_detector = load_face_detector()
 
     camera = cv2.VideoCapture(camera_index)
@@ -74,7 +77,7 @@ def run_camera(camera_index, classifier=None):
             if not captured:
                 raise RuntimeError(f"Could not read a frame from camera {camera_index}.")
 
-            mark_faces(frame, face_detector, classifier)
+            mark_faces(frame, face_detector, classifier, min_mask_score=min_mask_score)
             cv2.imshow(WINDOW_TITLE, frame)
             preview_opened = True
             key = cv2.waitKey(1) & 0xFF
@@ -95,6 +98,10 @@ def main():
     source.add_argument("--image", type=Path, help="Path to an input image.")
     parser.add_argument("--output", type=Path, help="Path for the annotated image.")
     parser.add_argument("--mask-model", type=Path, help="Path to the ONNX mask classifier.")
+    parser.add_argument(
+        "--min-mask-score", type=float,
+        help="Mark predictions below this score as Uncertain (0.5 to 1, requires --mask-model).",
+    )
     args = parser.parse_args()
     if args.camera is not None and args.camera < 0:
         parser.error("--camera must be zero or greater")
@@ -102,13 +109,18 @@ def main():
         parser.error("--image requires --output")
     if args.output is not None and args.image is None:
         parser.error("--output requires --image")
+    if args.min_mask_score is not None:
+        if not 0.5 <= args.min_mask_score <= 1:
+            parser.error("--min-mask-score must be between 0.5 and 1")
+        if args.mask_model is None:
+            parser.error("--min-mask-score requires --mask-model")
 
     try:
         classifier = MaskClassifier(args.mask_model) if args.mask_model is not None else None
         if args.image is not None:
-            run_image(args.image, args.output, classifier)
+            run_image(args.image, args.output, classifier, min_mask_score=args.min_mask_score)
         else:
-            run_camera(args.camera or 0, classifier)
+            run_camera(args.camera or 0, classifier, min_mask_score=args.min_mask_score)
     except (OSError, RuntimeError, cv2.error) as error:
         print(error, file=sys.stderr)
         return 1

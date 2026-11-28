@@ -1,3 +1,5 @@
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -6,7 +8,7 @@ from unittest.mock import Mock, patch
 import cv2
 import numpy as np
 
-from app import mark_faces, run_image
+from app import main, mark_faces, run_image
 from mask_classifier import MaskClassifier
 
 
@@ -82,3 +84,31 @@ class MaskAnnotationTests(unittest.TestCase):
         self.assertEqual(batch.shape, (1, 224, 224, 3))
         self.assertEqual(batch.dtype, np.float32)
         np.testing.assert_allclose(batch[0, 0, 0], [1, 128 / 127.5 - 1, -1], atol=1e-6)
+
+    def test_marks_scores_below_threshold_as_uncertain(self):
+        frame = np.zeros((120, 250, 3), dtype=np.uint8)
+        detector = Mock()
+        detector.detectMultiScale.return_value = [(10, 40, 45, 50), (150, 40, 45, 50)]
+        classifier = Mock()
+        classifier.predict.side_effect = [("Mask", 0.74), ("No mask", 0.75)]
+
+        with patch.object(cv2, "putText", wraps=cv2.putText) as draw_label:
+            self.assertEqual(mark_faces(frame, detector, classifier, min_mask_score=0.75), 2)
+
+        self.assertEqual([call.args[1] for call in draw_label.call_args_list], ["Uncertain 74%", "No mask 75%"])
+        self.assertEqual(tuple(frame[40, 10]), (0, 165, 255))
+        self.assertEqual(tuple(frame[40, 150]), (0, 0, 255))
+
+    def test_rejects_invalid_scores_and_missing_model_argument(self):
+        cases = [
+            (["--mask-model", "model.onnx", "--min-mask-score", value], "must be between 0.5 and 1")
+            for value in ("0.49", "1.01", "nan")
+        ]
+        cases.append((["--min-mask-score", "0.75"], "requires --mask-model"))
+        for args, message in cases:
+            with self.subTest(args=args), patch("sys.argv", ["app.py", *args]):
+                errors = StringIO()
+                with redirect_stderr(errors), self.assertRaises(SystemExit) as exit_status:
+                    main()
+                self.assertEqual(exit_status.exception.code, 2)
+                self.assertIn(message, errors.getvalue())
